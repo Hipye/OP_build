@@ -6,7 +6,7 @@
 # Blog: https://p3terx.com
 #=================================================
 
-name: Build Offical OpenWrt
+name: Build G-Dock Lean's OpenWrt
 
 on:
   repository_dispatch:
@@ -16,22 +16,20 @@ on:
     branches:
       - master
     paths:
-      - 'config/offical/*.config'
+      - 'config/lean/gdock-lean-openwrt.config'
 #  schedule:
-#    - cron: 0 8 * * 5
+#     - cron: 0 18 * * *
 #  watch:
-#    types: started
+#    types: push
 
 env:
-  REPO_URL: https://github.com/openwrt/openwrt
+  REPO_URL: https://github.com/coolsnowwolf/lede
   REPO_BRANCH: master
-  CONFIG_FILE: config/offical/*.config
-  DIY_SH: scripts/offical-openwrt.sh
-  FEEDS_CONF: feeds.conf.default
+  CONFIG_FILE: config/lean/gdock-lean-openwrt.config
+  DEVICE: openwrt-ipq40xx-generic-p2w_r619ac-128m
+  DIY_SH: scripts/lean-openwrt.sh
   SSH_ACTIONS: false
   KMODS_IN_FIRMWARE: false
-  UPLOAD_BIN_DIR: true
-  UPLOAD_FIRMWARE: true
   UPLOAD_COWTRANSFER: true
   UPLOAD_WETRANSFER: true
   TZ: Asia/Shanghai
@@ -43,7 +41,7 @@ jobs:
 
     steps:
     - name: Checkout
-      uses: actions/checkout@master
+      uses: actions/checkout@main
 
     - name: Initialization Environment
       env:
@@ -51,7 +49,7 @@ jobs:
       run: |
         sudo rm -rf /etc/apt/sources.list.d/* /usr/share/dotnet /usr/local/lib/android /opt/ghc
         sudo -E apt-get -qq update
-        sudo -E apt-get -qq install $(curl -fsSL git.io/depends-ubuntu-1804)
+        sudo -E apt-get -qq install $(curl -fsSL git.io/depends-ubuntu-1804) tree
         sudo -E apt-get -qq autoremove --purge
         sudo -E apt-get -qq clean
         sudo timedatectl set-timezone "$TZ"
@@ -65,7 +63,6 @@ jobs:
       run: |
         cd openwrt
         echo "::set-env name=OPENWRTROOT::$PWD"
-        sed -i 's/luci.git/luci.git\;openwrt-19.07/g' feeds.conf.default
         ./scripts/feeds update -a
 
     - name: Install Feeds
@@ -75,18 +72,14 @@ jobs:
 
     - name: Load Custom Configuration
       run: |
-        [ -e $FEEDS_CONF ] && mv $FEEDS_CONF openwrt/feeds.conf.default
         [ -e files ] && mv files $OPENWRTROOT/files
         [ -e $CONFIG_FILE ] && mv $CONFIG_FILE $OPENWRTROOT/.config
         chmod +x $DIY_SH
         cd $OPENWRTROOT
         ../$DIY_SH
-        ## If your device is Raspberrt Pi 4B:
-        # chmod +x ../scripts/enable-rpi4-wifi.sh
-        # ../scripts/enable-rpi4-wifi.sh
 
     - name: SSH Connection To Actions
-      uses: P3TERX/debugger-action@master
+      uses: P3TERX/debugger-action@main
       if: env.SSH_ACTIONS == 'true' || contains(github.event.action, 'ssh')
 
     - name: Download Package
@@ -110,7 +103,7 @@ jobs:
         make tools/compile -j$(nproc) || make tools/compile -j1 V=s
         make toolchain/compile -j$(nproc) || make toolchain/compile -j1 V=s
         make target/compile -j$(nproc) || make target/compile -j1 V=s IGNORE_ERRORS=1
-        make buildinfo
+        make diffconfig
         make package/compile -j$(nproc) IGNORE_ERRORS=1 || make package/compile -j1 V=s IGNORE_ERRORS=1
         make package/index
         echo "::set-output name=status::success"
@@ -139,12 +132,12 @@ jobs:
         then
             mkdir -p files/www/snapshots/targets
             cp -r bin/targets/$TARGET files/www/snapshots/targets
-            cp ../config/opkg/distfeeds-19.07-local.conf files/etc/opkg/distfeeds.conf
+            cp ../config/opkg/distfeeds-18.06-local.conf files/etc/opkg/distfeeds.conf
             sed -i "s/subtarget/$SUBTARGET/g" files/etc/opkg/distfeeds.conf
             sed -i "s/target\//$TARGET\//g" files/etc/opkg/distfeeds.conf
             sed -i "s/platform/$PLATFORM/g" files/etc/opkg/distfeeds.conf
         else
-            cp ../config/opkg/distfeeds-19.07-remote.conf files/etc/opkg/distfeeds.conf
+            cp ../config/opkg/distfeeds-18.06-remote.conf files/etc/opkg/distfeeds.conf
             sed -i "s/subtarget/$SUBTARGET/g" files/etc/opkg/distfeeds.conf
             sed -i "s/target\//$TARGET\//g" files/etc/opkg/distfeeds.conf
             sed -i "s/platform/$PLATFORM/g" files/etc/opkg/distfeeds.conf
@@ -152,9 +145,6 @@ jobs:
         make package/install -j$(nproc) || make package/install -j1 V=s
         make target/install -j$(nproc) || make target/install -j1 V=s
         make checksum
-        grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
-        [ -s DEVICE_NAME ] && echo "::set-env name=DEVICE_NAME::_$(cat DEVICE_NAME)"
-        echo "::set-env name=FILE_DATE::_$(date +"%Y%m%d%H%M")"
         echo "::set-output name=status::success"
         
     - name: Deploy Packages-Server
@@ -169,58 +159,94 @@ jobs:
         zip -q -r packages-server.zip pre-packages-server/server
         
     - name: Upload Config
-      uses: actions/upload-artifact@master
+      uses: actions/upload-artifact@main
       if: steps.generate.outputs.status == 'success'
       with:
         name: config.buildinfo
         path: openwrt/bin/targets/${{ env.TARGET }}/${{ env.SUBTARGET }}/config.buildinfo
         
     - name: Upload Packages-Server
-      uses: actions/upload-artifact@master
+      uses: actions/upload-artifact@main
       if: steps.generate.outputs.status == 'success'
       with:
         name: packages-server
         path: openwrt/bin/targets/${{ env.TARGET }}/${{ env.SUBTARGET }}/pre-packages-server
         
+    - name: Upload Packages Info
+      uses: actions/upload-artifact@main
+      if: steps.generate.outputs.status == 'success'
+      with:
+        name: ${{ env.DEVICE }}.manifest
+        path: openwrt/bin/targets/${{ env.TARGET }}/${{ env.SUBTARGET }}/${{ env.DEVICE }}.manifest
+        
+    - name: Upload RootFS Archive
+      uses: actions/upload-artifact@main
+      if: steps.generate.outputs.status == 'success'
+      with:
+        name: ${{ env.DEVICE }}-rootfs.tar.gz
+        path: openwrt/bin/targets/${{ env.TARGET }}/${{ env.SUBTARGET }}/${{ env.DEVICE }}-rootfs.tar.gz
+        
+    - name: Upload SquashFS Factory Image
+      uses: actions/upload-artifact@main
+      if: steps.generate.outputs.status == 'success'
+      with:
+        name: ${{ env.DEVICE }}-squashfs-nand-factory.ubi
+        path: openwrt/bin/targets/${{ env.TARGET }}/${{ env.SUBTARGET }}/${{ env.DEVICE }}-squashfs-nand-factory.ubi
+        
+    - name: Upload SquashFS Sysupgrade Image
+      uses: actions/upload-artifact@main
+      if: steps.generate.outputs.status == 'success'
+      with:
+        name: ${{ env.DEVICE }}-squashfs-nand-sysupgrade.bin
+        path: openwrt/bin/targets/${{ env.TARGET }}/${{ env.SUBTARGET }}/${{ env.DEVICE }}-squashfs-nand-sysupgrade.bin
+        
+    - name: Upload Fit uImage
+      uses: actions/upload-artifact@main
+      if: steps.generate.outputs.status == 'success'
+      with:
+        name: ${{ env.DEVICE }}-initramfs-fit-zImage.itb
+        path: openwrt/bin/targets/${{ env.TARGET }}/${{ env.SUBTARGET }}/${{ env.DEVICE }}-initramfs-fit-zImage.itb
+
     - name: Upload Images Sha256sums
-      uses: actions/upload-artifact@master
+      uses: actions/upload-artifact@main
       if: steps.generate.outputs.status == 'success'
       with:
         name: sha256sums
         path: openwrt/bin/targets/${{ env.TARGET }}/${{ env.SUBTARGET }}/sha256sums
-        
-    - name: Upload Bin Directory
-      uses: actions/upload-artifact@master
-      if: steps.generate.outputs.status == 'success' && env.UPLOAD_BIN_DIR == 'true'
-      with:
-        name: openwrt-bin-directory${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
-        path: openwrt/bin
 
     - name: Organize Files
       id: organize
-      if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
+      if: steps.generate.outputs.status == 'success' && !cancelled()
       run: |
-        cd openwrt/bin/targets/$TARGET/$SUBTARGET
+        cd $OPENWRTROOT
+        zip -qr dl.zip dl
+        cd $OPENWRTROOT/bin/targets/$TARGET/$SUBTARGET
         rm -rf packages pre-packages-server
+        tree -L 1
         echo "::set-output name=status::success"
-
-    - name: Upload Firmware Directory
-      uses: actions/upload-artifact@master
-      if: steps.organize.outputs.status == 'success' && !cancelled()
-      with:
-        name: openwrt-firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
-        path: ${{ env.FIRMWARE }}
 
     - name: Upload Firmware To CowTransfer
       if: steps.organize.outputs.status == 'success' && env.UPLOAD_COWTRANSFER == 'true' && !cancelled()
       run: |
         curl -fsSL git.io/file-transfer | sh
         ./transfer cow --block 2621440 -s -p 64 --no-progress ${FIRMWARE} 2>&1 | tee cowtransfer.log
-        echo "::warning file=cowtransfer.com::$(cat cowtransfer.log | grep https)"
+        echo "::warning file=Firmware-cowtransfer.com::$(cat cowtransfer.log | grep https)"
 
     - name: Upload Firmware To WeTransfer
       if: steps.organize.outputs.status == 'success' && env.UPLOAD_WETRANSFER == 'true' && !cancelled()
       run: |
         curl -fsSL git.io/file-transfer | sh
         ./transfer wet -s -p 16 --no-progress ${FIRMWARE} 2>&1 | tee wetransfer.log
-        echo "::warning file=wetransfer.com::$(cat wetransfer.log | grep https)"
+        echo "::warning file=Firmware-wetransfer.com::$(cat wetransfer.log | grep https)"
+
+    - name: Upload DL To CowTransfer
+      if: steps.organize.outputs.status == 'success' && env.UPLOAD_COWTRANSFER == 'true' && !cancelled()
+      run: |
+        ./transfer cow --block 2621440 -s -p 64 --no-progress ${OPENWRTROOT}/dl.zip 2>&1 | tee cowtransfer-dl.log
+        echo "::warning file=DL-cowtransfer.com::$(cat cowtransfer-dl.log | grep https)"
+        
+    - name: Upload DL To WeTransfer
+      if: steps.organize.outputs.status == 'success' && env.UPLOAD_WETRANSFER == 'true' && !cancelled()
+      run: |
+        ./transfer wet -s -p 16 --no-progress ${OPENWRTROOT}/dl.zip 2>&1 | tee wetransfer-dl.log
+        echo "::warning file=DL-wetransfer.com::$(cat wetransfer-dl.log | grep https)"
