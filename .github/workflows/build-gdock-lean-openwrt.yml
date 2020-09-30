@@ -28,7 +28,7 @@ env:
   CONFIG_FILE: config/lean/gdock-lean-openwrt.config
   DEVICE: openwrt-ipq40xx-generic-p2w_r619ac-128m
   DIY_SH: scripts/lean-openwrt.sh
-  SSH_ACTIONS: false
+  SSH_ACTIONS: true
   KMODS_IN_FIRMWARE: false
   UPLOAD_COWTRANSFER: true
   UPLOAD_WETRANSFER: true
